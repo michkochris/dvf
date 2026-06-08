@@ -5,6 +5,7 @@
 #include "dvf-util.h"
 #include "dvf-rpm.h"
 #include "dvf-completion.h"
+#include "dvf-sqlite.h"
 
 #ifdef ENABLE_CPP_FFI
 #include "dvf-repo.h"
@@ -105,8 +106,33 @@ int main(int argc, char **argv) {
                         dvf_log_error("Failed to parse RPM file: %s\n", target);
                     }
                 } else {
-                    printf("Package info for %s:\n", target);
-                    printf(" (Search in repositories not yet implemented in Core mode)\n");
+                    dvf_log_verbose("Searching for installed package '%s'...\n", target);
+                    const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
+                    if (!dvf_util_file_exists(db_path)) db_path = "rpmdb.sqlite";
+
+                    dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
+                    bool found = false;
+                    if (blobs) {
+                        for (size_t j = 0; j < blobs->count; j++) {
+                            rpm_info_t info;
+                            memset(&info, 0, sizeof(info));
+                            if (rpm_parse_header(blobs->blobs[j].data, blobs->blobs[j].size, &info) == 0) {
+                                if (info.name && strcmp(info.name, target) == 0) {
+                                    rpm_print_info(&info);
+                                    found = true;
+                                    rpm_free_info(&info);
+                                    break;
+                                }
+                            }
+                            rpm_free_info(&info);
+                        }
+                        dvf_sqlite_free_blob_list(blobs);
+                    }
+
+                    if (!found) {
+                        printf("Package info for %s:\n", target);
+                        printf(" (Not found in installed packages. Search in repositories not yet implemented in Core mode)\n");
+                    }
                 }
             } else {
                 dvf_log_error("info requires a package name or .rpm file path.\n");

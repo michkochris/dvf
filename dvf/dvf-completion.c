@@ -32,11 +32,20 @@ static int compare_strings(const void *a, const void *b) {
 int dvf_sync_autocomplete(void) {
     dvf_log_verbose("Syncing autocomplete index from rpmdb...\n");
 
-    dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs("/var/lib/rpm/rpmdb.sqlite");
+    const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
+    if (!dvf_util_file_exists(db_path)) {
+        dvf_log_verbose("Primary rpmdb not found at %s, trying fallback...\n", db_path);
+        // Maybe try a relative path for testing or common alternate locations
+        if (dvf_util_file_exists("rpmdb.sqlite")) db_path = "rpmdb.sqlite";
+    }
+
+    dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
     if (!blobs) {
-        dvf_log_error("Failed to read rpmdb.sqlite\n");
+        dvf_log_error("Failed to read rpmdb.sqlite at %s\n", db_path);
         return -1;
     }
+
+    dvf_log_verbose("Found %zu blobs in rpmdb. Parsing headers...\n", blobs->count);
 
     char **names = NULL;
     size_t count = 0;
@@ -49,7 +58,11 @@ int dvf_sync_autocomplete(void) {
                 names = realloc(names, sizeof(char *) * (count + 1));
                 names[count++] = info.name;
                 info.name = NULL;
+            } else {
+                dvf_log_verbose("  Blob %zu parsed but had no name tag.\n", i);
             }
+        } else {
+            dvf_log_verbose("  Failed to parse RPM header for blob %zu (size %zu).\n", i, blobs->blobs[i].size);
         }
         rpm_free_info(&info);
     }
@@ -60,6 +73,7 @@ int dvf_sync_autocomplete(void) {
         return 0;
     }
 
+    dvf_log_verbose("Sorting and deduplicating %zu package names...\n", count);
     qsort(names, count, sizeof(char *), compare_strings);
 
     // Deduplicate
