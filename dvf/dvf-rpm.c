@@ -34,6 +34,45 @@ static char *get_tag_string(const rpm_index_entry_t *entry, const uint8_t *data_
     return NULL;
 }
 
+int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info) {
+    if (size < sizeof(rpm_header_t)) return -1;
+
+    const rpm_header_t *h = (const rpm_header_t *)data;
+    if (memcmp(h->magic, "\x8e\xad\xe8", 3) != 0) return -1;
+
+    uint32_t index_count = read_be32(h->index_count);
+    uint32_t data_size = read_be32(h->data_size);
+
+    if (size < sizeof(rpm_header_t) + index_count * sizeof(rpm_index_entry_t) + data_size) {
+        return -1;
+    }
+
+    const rpm_index_entry_t *indices = (const rpm_index_entry_t *)(data + sizeof(rpm_header_t));
+    const uint8_t *data_store = data + sizeof(rpm_header_t) + index_count * sizeof(rpm_index_entry_t);
+
+    for (uint32_t i = 0; i < index_count; i++) {
+        int32_t tag = read_be32(indices[i].tag);
+        switch (tag) {
+            case RPMTAG_NAME:
+                info->name = get_tag_string(&indices[i], data_store);
+                break;
+            case RPMTAG_VERSION:
+                info->version = get_tag_string(&indices[i], data_store);
+                break;
+            case RPMTAG_RELEASE:
+                info->release = get_tag_string(&indices[i], data_store);
+                break;
+            case RPMTAG_ARCH:
+                info->arch = get_tag_string(&indices[i], data_store);
+                break;
+            case RPMTAG_PAYLOADCOMPRESSOR:
+                info->payload_compressor = get_tag_string(&indices[i], data_store);
+                break;
+        }
+    }
+    return 0;
+}
+
 int rpm_parse_file(const char *filename, rpm_info_t *info) {
     FILE *f = fopen(filename, "rb");
     if (!f) {
@@ -73,6 +112,7 @@ int rpm_parse_file(const char *filename, rpm_info_t *info) {
 
     // 3. Read Main Header
     rpm_header_t main_header;
+    long main_header_pos = ftell(f);
     if (fread(&main_header, sizeof(main_header), 1, f) != 1) goto err;
     if (memcmp(main_header.magic, "\x8e\xad\xe8", 3) != 0) {
         dvf_log_error("Invalid Main Header magic\n");
@@ -81,46 +121,23 @@ int rpm_parse_file(const char *filename, rpm_info_t *info) {
 
     uint32_t index_count = read_be32(main_header.index_count);
     uint32_t data_size = read_be32(main_header.data_size);
+    size_t header_full_size = sizeof(rpm_header_t) + index_count * sizeof(rpm_index_entry_t) + data_size;
 
-    rpm_index_entry_t *indices = malloc(index_count * sizeof(rpm_index_entry_t));
-    if (fread(indices, sizeof(rpm_index_entry_t), index_count, f) != index_count) {
-        free(indices);
+    uint8_t *header_buf = malloc(header_full_size);
+    fseek(f, main_header_pos, SEEK_SET);
+    if (fread(header_buf, 1, header_full_size, f) != header_full_size) {
+        free(header_buf);
         goto err;
     }
 
-    uint8_t *data_store = malloc(data_size);
-    if (fread(data_store, 1, data_size, f) != data_size) {
-        free(indices);
-        free(data_store);
+    if (rpm_parse_header(header_buf, header_full_size, info) != 0) {
+        free(header_buf);
         goto err;
-    }
-
-    // 4. Parse Metadata
-    for (uint32_t i = 0; i < index_count; i++) {
-        int32_t tag = read_be32(indices[i].tag);
-        switch (tag) {
-            case RPMTAG_NAME:
-                info->name = get_tag_string(&indices[i], data_store);
-                break;
-            case RPMTAG_VERSION:
-                info->version = get_tag_string(&indices[i], data_store);
-                break;
-            case RPMTAG_RELEASE:
-                info->release = get_tag_string(&indices[i], data_store);
-                break;
-            case RPMTAG_ARCH:
-                info->arch = get_tag_string(&indices[i], data_store);
-                break;
-            case RPMTAG_PAYLOADCOMPRESSOR:
-                info->payload_compressor = get_tag_string(&indices[i], data_store);
-                break;
-        }
     }
 
     info->payload_offset = ftell(f);
 
-    free(indices);
-    free(data_store);
+    free(header_buf);
     fclose(f);
     return 0;
 

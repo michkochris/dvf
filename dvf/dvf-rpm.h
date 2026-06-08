@@ -55,6 +55,7 @@ typedef struct {
 } rpm_info_t;
 
 int rpm_parse_file(const char *filename, rpm_info_t *info);
+int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info);
 void rpm_free_info(rpm_info_t *info);
 void rpm_print_info(const rpm_info_t *info);
 

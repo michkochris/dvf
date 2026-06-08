@@ -4,6 +4,7 @@
 #include "dvf-config.h"
 #include "dvf-util.h"
 #include "dvf-rpm.h"
+#include "dvf-completion.h"
 
 #ifdef ENABLE_CPP_FFI
 #include "dvf-repo.h"
@@ -21,9 +22,17 @@ void usage() {
     printf("  remove <pkg>     Remove a package\n");
     printf("  search <term>    Search for packages\n");
     printf("  info <pkg>       Show package information\n");
+    printf("  sync             Sync autocomplete index from rpmdb\n");
 }
 
 int main(int argc, char **argv) {
+    if (argc == 4 && is_completion_trigger(argv)) {
+        dvf_config_init();
+        handle_binary_completion(argv[2], argv[3]);
+        dvf_config_cleanup();
+        return 0;
+    }
+
     if (argc < 2) {
         usage();
         return 1;
@@ -101,6 +110,11 @@ int main(int argc, char **argv) {
                 }
             } else {
                 dvf_log_error("info requires a package name or .rpm file path.\n");
+                exit_code = 1;
+            }
+        } else if (strcmp(argv[i], "sync") == 0) {
+            if (dvf_sync_autocomplete() != 0) {
+                dvf_log_error("Failed to sync autocomplete index.\n");
                 exit_code = 1;
             }
         } else {
