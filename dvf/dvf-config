@@ -1,0 +1,22 @@
+# dvf configuration file
+# This is a sample configuration for dvf (Vamped DNF)
+
+# Base directory for dvf data
+dvf_dir = /var/lib/dvf
+
+# Enable/Disable MD5 checks
+md5_checks = yes
+
+# Cleanup temporary files after install
+cleanup = yes
+
+# Repository definitions (mirrorlist or metalink)
+[fedora]
+name = Fedora $releasever - $basearch
+metalink = https://mirrors.fedoraproject.org/metalink?repo=fedora-$releasever&arch=$basearch
+enabled = 1
+
+[updates]
+name = Fedora $releasever - $basearch - Updates
+metalink = https://mirrors.fedoraproject.org/metalink?repo=updates-released-f$releasever&arch=$basearch
+enabled = 1
