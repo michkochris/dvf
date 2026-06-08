@@ -3,6 +3,7 @@
 #include <string.h>
 #include "dvf-config.h"
 #include "dvf-util.h"
+#include "dvf-rpm.h"
 
 #ifdef ENABLE_CPP_FFI
 #include "dvf-repo.h"
@@ -84,11 +85,22 @@ int main(int argc, char **argv) {
                 exit_code = 1;
             }
         } else if (strcmp(argv[i], "info") == 0) {
-             if (i + 1 < argc) {
-                printf("Package info for %s:\n", argv[++i]);
-                printf(" (Stub info)\n");
+            if (i + 1 < argc) {
+                const char *target = argv[++i];
+                if (dvf_util_file_exists(target) && strstr(target, ".rpm")) {
+                    rpm_info_t info;
+                    if (rpm_parse_file(target, &info) == 0) {
+                        rpm_print_info(&info);
+                        rpm_free_info(&info);
+                    } else {
+                        dvf_log_error("Failed to parse RPM file: %s\n", target);
+                    }
+                } else {
+                    printf("Package info for %s:\n", target);
+                    printf(" (Search in repositories not yet implemented in Core mode)\n");
+                }
             } else {
-                dvf_log_error("info requires a package name.\n");
+                dvf_log_error("info requires a package name or .rpm file path.\n");
                 exit_code = 1;
             }
         } else {

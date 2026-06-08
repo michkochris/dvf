@@ -1,0 +1,61 @@
+#ifndef DVF_RPM_H
+#define DVF_RPM_H
+
+#include <stdint.h>
+#include <stdio.h>
+
+// RPM Lead (Legacy, 96 bytes)
+typedef struct {
+    uint8_t magic[4];   // ed ab ee db
+    uint8_t major;
+    uint8_t minor;
+    uint16_t type;
+    uint16_t archnum;
+    char name[66];
+    uint16_t osnum;
+    uint16_t signature_type;
+    uint8_t reserved[16];
+} __attribute__((packed)) rpm_lead_t;
+
+// RPM Header Structure (16 bytes)
+typedef struct {
+    uint8_t magic[3];   // 8e ad e8
+    uint8_t version;     // 01
+    uint32_t reserved;
+    uint32_t index_count;
+    uint32_t data_size;
+} __attribute__((packed)) rpm_header_t;
+
+// RPM Index Entry (16 bytes)
+typedef struct {
+    int32_t tag;
+    int32_t type;
+    int32_t offset;
+    int32_t count;
+} __attribute__((packed)) rpm_index_entry_t;
+
+// Important Tags
+#define RPMTAG_NAME 1000
+#define RPMTAG_VERSION 1001
+#define RPMTAG_RELEASE 1002
+#define RPMTAG_ARCH 1022
+#define RPMTAG_PAYLOADCOMPRESSOR 1125
+
+// Important Types
+#define RPM_STRING_TYPE 6
+#define RPM_I18NSTRING_TYPE 8
+
+typedef struct {
+    char *name;
+    char *version;
+    char *release;
+    char *arch;
+    char *payload_compressor;
+    long payload_offset;
+} rpm_info_t;
+
+int rpm_parse_file(const char *filename, rpm_info_t *info);
+void rpm_free_info(rpm_info_t *info);
+void rpm_print_info(const rpm_info_t *info);
+
+#endif // DVF_RPM_H

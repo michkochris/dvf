@@ -47,11 +47,11 @@ ETCDIR ?= /etc
 REPO_DIR ?= $(ETCDIR)/yum.repos.d
 
 # Source files
-C_SOURCES = dvf-main.c dvf-config.c dvf-util.c
+C_SOURCES = dvf-main.c dvf-config.c dvf-util.c dvf-rpm.c
 OBJS = $(C_SOURCES:.c=.o) $(CPP_SOURCES:.cpp=.o)
 
 # Header files
-HEADERS = dvf-config.h dvf-util.h $(CPP_HEADERS)
+HEADERS = dvf-config.h dvf-util.h dvf-rpm.h $(CPP_HEADERS)
 
 .PHONY: all clean dvf debug install uninstall
 
@@ -74,6 +74,7 @@ all: $(OBJS)
 clean:
 	@echo "Cleaning up build artifacts..."
 	rm -f $(OBJS) $(TARGET) $(C_SOURCES:.c=.d) $(CPP_SOURCES:.cpp=.d)
+	rm -rf test_rpms
 	@echo "🧹 Clean complete."
 
 install: all
