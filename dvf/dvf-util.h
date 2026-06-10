@@ -21,6 +21,8 @@ char *dvf_util_trim_whitespace(char *str);
 char *dvf_util_get_config_value(const char *filepath, const char *key, char separator);
 bool dvf_util_parse_yes_no(const char *val, bool default_val);
 
+int dvf_util_compare_versions(const char *v1, const char *v2);
+
 #ifdef __cplusplus
 }
 #endif

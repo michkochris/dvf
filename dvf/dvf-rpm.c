@@ -12,24 +12,46 @@ void rpm_free_info(rpm_info_t *info) {
     free(info->name);
     free(info->version);
     free(info->release);
+    free(info->epoch);
     free(info->arch);
+    free(info->summary);
+    free(info->description);
     free(info->payload_compressor);
     memset(info, 0, sizeof(rpm_info_t));
 }
 
 void rpm_print_info(const rpm_info_t *info) {
-    printf("\033[1mPackage Info:\033[0m\n");
-    printf("  Name       : %s\n", info->name ? info->name : "unknown");
-    printf("  Version    : %s\n", info->version ? info->version : "unknown");
-    printf("  Release    : %s\n", info->release ? info->release : "unknown");
-    printf("  Arch       : %s\n", info->arch ? info->arch : "unknown");
-    printf("  Compressor : %s\n", info->payload_compressor ? info->payload_compressor : "unknown");
-    printf("  Payload At : %ld bytes\n", info->payload_offset);
+    printf("\033[1mName          \033[0m: %s\n", info->name ? info->name : "unknown");
+    if (info->epoch && strcmp(info->epoch, "0") != 0)
+        printf("\033[1mEpoch         \033[0m: %s\n", info->epoch);
+    printf("\033[1mVersion       \033[0m: %s\n", info->version ? info->version : "unknown");
+    printf("\033[1mRelease       \033[0m: %s\n", info->release ? info->release : "unknown");
+    printf("\033[1mArchitecture  \033[0m: %s\n", info->arch ? info->arch : "unknown");
+    if (info->summary)     printf("\033[1mSummary       \033[0m: %s\n", info->summary);
+    if (info->description) printf("\033[1mDescription   \033[0m: %s\n", info->description);
+    printf("\033[1mCompressor    \033[0m: %s\n", info->payload_compressor ? info->payload_compressor : "unknown");
+    if (info->payload_offset > 0)
+        printf("\033[1mPayload Offset\033[0m: %ld bytes\n", info->payload_offset);
 }
 
 static char *get_tag_string(const rpm_index_entry_t *entry, const uint8_t *data_store) {
-    if (read_be32(entry->type) == RPM_STRING_TYPE || read_be32(entry->type) == RPM_I18NSTRING_TYPE) {
+    uint32_t type = read_be32(entry->type);
+    if (type == RPM_STRING_TYPE || type == RPM_I18NSTRING_TYPE) {
         return strdup((const char *)(data_store + read_be32(entry->offset)));
+    } else if (type == 3) { // INT16
+        uint16_t v;
+        memcpy(&v, data_store + read_be32(entry->offset), 2);
+        uint32_t val = be16toh(v);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%u", val);
+        return strdup(buf);
+    } else if (type == 4) { // INT32
+        uint32_t v;
+        memcpy(&v, data_store + read_be32(entry->offset), 4);
+        uint32_t val = be32toh(v);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%u", val);
+        return strdup(buf);
     }
     return NULL;
 }
@@ -62,8 +84,17 @@ int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info) {
             case RPMTAG_RELEASE:
                 info->release = get_tag_string(&indices[i], data_store);
                 break;
+            case RPMTAG_EPOCH:
+                info->epoch = get_tag_string(&indices[i], data_store);
+                break;
             case RPMTAG_ARCH:
                 info->arch = get_tag_string(&indices[i], data_store);
+                break;
+            case RPMTAG_SUMMARY:
+                info->summary = get_tag_string(&indices[i], data_store);
+                break;
+            case RPMTAG_DESCRIPTION:
+                info->description = get_tag_string(&indices[i], data_store);
                 break;
             case RPMTAG_PAYLOADCOMPRESSOR:
                 info->payload_compressor = get_tag_string(&indices[i], data_store);

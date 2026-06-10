@@ -108,3 +108,75 @@ bool dvf_util_parse_yes_no(const char *val, bool default_val) {
     if (strcasecmp(val, "no") == 0 || strcasecmp(val, "n") == 0 || strcmp(val, "0") == 0 || strcasecmp(val, "false") == 0) return false;
     return default_val;
 }
+
+static int version_part_order(char c) {
+    if (isdigit(c)) return 0;
+    if (isalpha(c)) return (unsigned char)c;
+    if (c == '~') return -1;
+    if (c) return (unsigned char)c + 256;
+    return 0;
+}
+
+static int compare_version_part(const char *v1, const char *v2) {
+    while (*v1 || *v2) {
+        int first_diff = 0;
+        while ((*v1 && !isdigit(*v1)) || (*v2 && !isdigit(*v2))) {
+            int o1 = version_part_order(*v1);
+            int o2 = version_part_order(*v2);
+            if (o1 != o2) return o1 - o2;
+            if (*v1) v1++;
+            if (*v2) v2++;
+        }
+        while (*v1 == '0') v1++;
+        while (*v2 == '0') v2++;
+        while (isdigit(*v1) && isdigit(*v2)) {
+            if (!first_diff) first_diff = *v1 - *v2;
+            v1++; v2++;
+        }
+        if (isdigit(*v1)) return 1;
+        if (isdigit(*v2)) return -1;
+        if (first_diff) return first_diff;
+    }
+    return 0;
+}
+
+int dvf_util_compare_versions(const char *v1, const char *v2) {
+    if (!v1 || !v2) return v1 ? 1 : (v2 ? -1 : 0);
+
+    const char *e1 = strchr(v1, ':');
+    long epoch1 = e1 ? strtol(v1, NULL, 10) : 0;
+    const char *u1 = e1 ? e1 + 1 : v1;
+
+    const char *e2 = strchr(v2, ':');
+    long epoch2 = e2 ? strtol(v2, NULL, 10) : 0;
+    const char *u2 = e2 ? e2 + 1 : v2;
+
+    if (epoch1 != epoch2) return (epoch1 > epoch2) ? 1 : -1;
+
+    const char *r1 = strrchr(u1, '-');
+    const char *r2 = strrchr(u2, '-');
+
+    if (r1 && r2) {
+        size_t len1 = r1 - u1;
+        size_t len2 = r2 - u2;
+        char *up1 = strndup(u1, len1);
+        char *up2 = strndup(u2, len2);
+        int res = compare_version_part(up1, up2);
+        free(up1); free(up2);
+        if (res) return res;
+        return compare_version_part(r1 + 1, r2 + 1);
+    } else if (r1) {
+        char *up1 = strndup(u1, r1 - u1);
+        int res = compare_version_part(up1, u2);
+        free(up1);
+        if (res) return res;
+        return compare_version_part(r1 + 1, "");
+    } else if (r2) {
+        char *up2 = strndup(u2, r2 - u2);
+        int res = compare_version_part(u1, up2);
+        free(up2);
+        if (res) return res;
+        return compare_version_part("", r2 + 1);
+    }
+    return compare_version_part(u1, u2);
+}

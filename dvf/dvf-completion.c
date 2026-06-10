@@ -408,6 +408,7 @@ void handle_binary_completion(const char *partial, const char *prev) {
                 else if (strcmp(tok, "update") == 0) strncpy(inferred_cmd, "update", sizeof(inferred_cmd)-1);
                 else if (strcmp(tok, "search") == 0) strncpy(inferred_cmd, "search", sizeof(inferred_cmd)-1);
                 else if (strcmp(tok, "info") == 0) strncpy(inferred_cmd, "info", sizeof(inferred_cmd)-1);
+                else if (strcmp(tok, "check-update") == 0) strncpy(inferred_cmd, "check-update", sizeof(inferred_cmd)-1);
                 else if (strcmp(tok, "sync") == 0) strncpy(inferred_cmd, "sync", sizeof(inferred_cmd)-1);
                 tok = strtok_r(NULL, " \t", &saveptr);
             }
@@ -416,7 +417,7 @@ void handle_binary_completion(const char *partial, const char *prev) {
     }
 
     if (strcmp(prev, "dvf") == 0) {
-        const char *subcmds[] = {"update", "install", "remove", "search", "info", "sync"};
+        const char *subcmds[] = {"update", "install", "remove", "search", "info", "check-update", "sync"};
         for (size_t i = 0; i < sizeof(subcmds)/sizeof(subcmds[0]); i++) {
             if (strncmp(subcmds[i], partial, strlen(partial)) == 0) printf("%s\n", subcmds[i]);
         }
@@ -435,7 +436,7 @@ void handle_binary_completion(const char *partial, const char *prev) {
         }
     } else if (strcmp(cmd, "remove") == 0 || strcmp(cmd, "search") == 0) {
         prefix_search_and_print(partial);
-    } else if (strcmp(cmd, "update") == 0 || strcmp(cmd, "sync") == 0) {
+    } else if (strcmp(cmd, "update") == 0 || strcmp(cmd, "sync") == 0 || strcmp(cmd, "check-update") == 0) {
         if (partial[0] == '-') printf("--verbose\n--debug\n");
     }
 }

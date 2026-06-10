@@ -26,6 +26,7 @@ DVF supports several commands, which can be interleaved:
 - `remove <pkg>`: Remove an installed package.
 - `search <term>`: Search for packages in name and summary.
 - `info <pkg>`: Display detailed RPM header information.
+- `check-update`: Check for available package updates across all enabled repositories.
 - `sync`: Rebuild the local autocomplete index by merging `rpmdb` and repository metadata.
 
 **Example:**

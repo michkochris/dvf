@@ -23,6 +23,7 @@ void usage() {
     printf("  remove <pkg>     Remove a package\n");
     printf("  search <term>    Search for packages\n");
     printf("  info <pkg>       Show package information\n");
+    printf("  check-update     Check for available package updates\n");
     printf("  sync             Sync autocomplete index from rpmdb\n");
 }
 
@@ -96,6 +97,30 @@ int main(int argc, char **argv) {
              if (i + 1 < argc) {
                 const char *term = argv[++i];
                 printf("Searching for '%s'...\n", term);
+
+                // Search installed packages
+                const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
+                if (!dvf_util_file_exists(db_path)) db_path = "rpmdb.sqlite";
+                dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
+                if (blobs) {
+                    for (size_t j = 0; j < blobs->count; j++) {
+                        rpm_info_t info;
+                        memset(&info, 0, sizeof(info));
+                        if (rpm_parse_header(blobs->blobs[j].data, blobs->blobs[j].size, &info) == 0) {
+                            if (info.name && (strcasestr(info.name, term) || (info.summary && strcasestr(info.summary, term)))) {
+                                printf("%s.%s : %s (Installed)\n", info.name, info.arch ? info.arch : "noarch", info.summary ? info.summary : "");
+                            }
+                        }
+                        rpm_free_info(&info);
+                    }
+                    dvf_sqlite_free_blob_list(blobs);
+                }
+
+#ifdef ENABLE_CPP_FFI
+                dvf_repo_search(term);
+#else
+                printf("Notice: Remote repository search requires C++ FFI.\n");
+#endif
             } else {
                 dvf_log_error("search requires a search term.\n");
                 exit_code = 1;
@@ -138,13 +163,29 @@ int main(int argc, char **argv) {
 
                     if (!found) {
                         printf("Package info for %s:\n", target);
+#ifdef ENABLE_CPP_FFI
+                        if (dvf_repo_info(target) != 0) {
+                             printf(" (Not found in repositories)\n");
+                        }
+#else
                         printf(" (Not found in installed packages. Search in repositories not yet implemented in Core mode)\n");
+#endif
                     }
                 }
             } else {
                 dvf_log_error("info requires a package name or .rpm file path.\n");
                 exit_code = 1;
             }
+        } else if (strcmp(argv[i], "check-update") == 0) {
+            printf("Checking for available updates...\n");
+#ifdef ENABLE_CPP_FFI
+            if (dvf_repo_check_updates() != 0) {
+                dvf_log_error("Failed to check for updates.\n");
+                exit_code = 1;
+            }
+#else
+            printf("Notice: Remote update checking requires C++ FFI.\n");
+#endif
         } else if (strcmp(argv[i], "sync") == 0) {
             printf("Synchronizing autocomplete index...\n");
             if (dvf_sync_autocomplete() != 0) {
