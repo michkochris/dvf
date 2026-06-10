@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,8 +21,11 @@ int dvf_util_create_dir_recursive(const char *path, int mode);
 char *dvf_util_trim_whitespace(char *str);
 char *dvf_util_get_config_value(const char *filepath, const char *key, char separator);
 bool dvf_util_parse_yes_no(const char *val, bool default_val);
+bool dvf_util_prompt_yes_no(const char *prompt);
+void dvf_util_free_and_null(char **ptr);
 
 int dvf_util_compare_versions(const char *v1, const char *v2);
+uint32_t dvf_util_hash_string(const char *str);
 
 #ifdef __cplusplus
 }

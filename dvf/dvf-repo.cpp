@@ -13,12 +13,16 @@
 #include <curl/curl.h>
 #include <map>
 #include <set>
+#include <deque>
 
 #include "dvf-repo.h"
 #include "dvf-util.h"
 #include "dvf-config.h"
 #include "dvf-sqlite.h"
 #include "dvf-rpm.h"
+#include "dvf-storage.h"
+#include "dvf-hash.h"
+#include "dvf-completion.h"
 
 extern "C" int dvf_repo_ffi_available(void) {
     return 1;
@@ -81,9 +85,8 @@ public:
         basearch = get_basearch();
     }
 
-    void load_repos() {
-        repos.clear();
-        DIR* dir = opendir("/etc/yum.repos.d");
+    void load_repo_dir(const std::string& path) {
+        DIR* dir = opendir(path.c_str());
         if (!dir) return;
 
         struct dirent* entry;
@@ -92,32 +95,79 @@ public:
             std::string filename = entry->d_name;
             if (filename.size() < 6 || filename.substr(filename.size() - 5) != ".repo") continue;
 
-            parse_repo_file("/etc/yum.repos.d/" + filename);
+            parse_repo_file(path + "/" + filename);
         }
         closedir(dir);
     }
 
+    void load_repos() {
+        repos.clear();
+
+        // Tier 1: Load repos from the main dvf-config file (Primary)
+        parse_repo_file("/etc/yum.repos.d/dvf-config");
+        if (!repos.empty()) {
+            printf("Repositories: Loading from dvf-config (Primary)\n");
+            return;
+        }
+
+        // Tier 2: Fallback to custom repo_dir from config
+        if (g_dvf_repo_dir) {
+            load_repo_dir(g_dvf_repo_dir);
+            if (!repos.empty()) {
+                printf("Repositories: Loading from %s (Custom)\n", g_dvf_repo_dir);
+                return;
+            }
+        }
+
+        // Tier 3: Final fallback to default system repos
+        printf("Repositories: Loading from /etc/yum.repos.d (System Fallback)\n");
+        load_repo_dir("/etc/yum.repos.d");
+    }
+
     void run_sync() {
         load_repos();
-        int total = 0;
-        for (const auto& r : repos) if (r.enabled) total++;
 
-        if (total == 0) {
+        bool has_enabled = false;
+        for (const auto& r : repos) if (r.enabled) { has_enabled = true; break; }
+
+        if (!has_enabled) {
             printf("No enabled repositories found.\n");
             current_state = DVF_STATE_SUCCESS;
             return;
         }
 
-        int current = 0;
+        printf("\n%-45s %s\n", "Repository", "Status");
+        printf("----------------------------------------------------------------\n");
+
         for (auto& repo : repos) {
             if (!repo.enabled) continue;
-            current++;
-            printf(" [%d/%d] Syncing repository: %s\n", current, total, repo.id.c_str());
-            if (!sync_repo(repo)) {
-                dvf_log_error("  Failed to sync repository %s\n", repo.id.c_str());
+
+            // Format output similar to DNF: Name/ID on left, status on right
+            printf("%-45s ", repo.id.c_str());
+            fflush(stdout);
+
+            if (sync_repo(repo)) {
+                printf("\033[1;32m[DONE]\033[0m\n");
+            } else {
+                printf("\033[1;31m[FAILED]\033[0m\n");
             }
         }
         current_state = DVF_STATE_SUCCESS;
+    }
+
+    std::vector<std::string> get_mirrors(Repo& repo) {
+        std::vector<std::string> mirrors;
+        if (!repo.baseurl.empty()) {
+            mirrors.push_back(repo.baseurl);
+        } else if (!repo.metalink.empty() || !repo.mirrorlist.empty()) {
+            std::string router_url = repo.metalink.empty() ? repo.mirrorlist : repo.metalink;
+            std::string router_cache = std::string(g_dvf_cache_dir) + "/" + repo.id + "_router.txt";
+            if (fetcher.fetchToFile(router_url, router_cache)) {
+                if (!repo.metalink.empty()) mirrors = parse_metalink_for_mirrors(router_cache);
+                else mirrors = parse_mirrorlist_for_mirrors(router_cache);
+            }
+        }
+        return mirrors;
     }
 
 private:
@@ -180,9 +230,22 @@ private:
             if (line.empty() || line[0] == '#') continue;
 
             if (line[0] == '[' && line.back() == ']') {
-                repos.emplace_back();
-                current_repo = &repos.back();
-                current_repo->id = line.substr(1, line.size() - 2);
+                std::string id = line.substr(1, line.size() - 2);
+
+                // Check if repo already exists (to allow overrides)
+                current_repo = nullptr;
+                for (auto& r : repos) {
+                    if (r.id == id) {
+                        current_repo = &r;
+                        break;
+                    }
+                }
+
+                if (!current_repo) {
+                    repos.emplace_back();
+                    current_repo = &repos.back();
+                    current_repo->id = id;
+                }
             } else if (current_repo) {
                 auto eq = line.find('=');
                 if (eq != std::string::npos) {
@@ -210,22 +273,7 @@ private:
 
     bool sync_repo(Repo& repo) {
         std::string repomd_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_repomd.xml";
-        std::vector<std::string> base_urls;
-
-        if (!repo.baseurl.empty()) {
-            base_urls.push_back(repo.baseurl);
-        } else if (!repo.metalink.empty() || !repo.mirrorlist.empty()) {
-            std::string router_url = repo.metalink.empty() ? repo.mirrorlist : repo.metalink;
-            std::string router_cache = std::string(g_dvf_cache_dir) + "/" + repo.id + "_router.txt";
-
-            if (fetcher.fetchToFile(router_url, router_cache)) {
-                if (!repo.metalink.empty()) {
-                    base_urls = parse_metalink_for_mirrors(router_cache);
-                } else {
-                    base_urls = parse_mirrorlist_for_mirrors(router_cache);
-                }
-            }
-        }
+        std::vector<std::string> base_urls = get_mirrors(repo);
 
         if (base_urls.empty()) return false;
 
@@ -318,6 +366,20 @@ private:
     }
 };
 
+static bool dvf_repo_has_metadata() {
+    DVF_FSM fsm;
+    fsm.load_repos();
+    for (const auto& repo : fsm.repos) {
+        if (!repo.enabled) continue;
+        std::string p1 = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.xml.zst";
+        std::string p2 = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.xml.gz";
+        std::string p3 = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.raw";
+        if (dvf_util_file_exists(p1.c_str()) || dvf_util_file_exists(p2.c_str()) || dvf_util_file_exists(p3.c_str()))
+            return true;
+    }
+    return false;
+}
+
 extern "C" int dvf_repo_update(void) {
     dvf_log_verbose("Starting DVF repository update (Advanced C++ FFI mode)...\n");
     if (curl_global_init(CURL_GLOBAL_ALL) != 0) {
@@ -326,19 +388,17 @@ extern "C" int dvf_repo_update(void) {
     }
 
     DVF_FSM fsm;
+    fsm.load_repos();
     fsm.run_sync();
 
     curl_global_cleanup();
     if (fsm.current_state == DVF_STATE_SUCCESS) {
         printf("All repositories synchronized successfully.\n");
+        printf("Updating autocomplete index...\n");
+        dvf_sync_autocomplete();
         return 0;
     }
     return -1;
-}
-
-extern "C" int dvf_repo_install(const char *pkg_name) {
-    dvf_log_verbose("Installing package '%s' via Advanced FSM...\n", pkg_name);
-    return 0;
 }
 
 struct RepoPackage {
@@ -351,8 +411,10 @@ struct RepoPackage {
     std::string description;
     std::string license;
     std::string url;
+    std::string location;
     std::string repo_id;
     std::vector<std::string> provides;
+    std::vector<std::string> requires_list;
 };
 
 static bool contains_nocase(const std::string& str, const std::string& term) {
@@ -413,6 +475,13 @@ static void parse_primary(const std::string& path, const std::string& repo_id, F
             pkg.url = get_tag("url");
             pkg.arch = get_tag("arch");
 
+            size_t loc_pos = pkg_xml.find("<location href=\"");
+            if (loc_pos != std::string::npos) {
+                size_t s = loc_pos + 16;
+                size_t e = pkg_xml.find("\"", s);
+                if (e != std::string::npos) pkg.location = pkg_xml.substr(s, e - s);
+            }
+
             size_t v_pos = pkg_xml.find("<version");
             if (v_pos != std::string::npos) {
                 auto get_attr = [&](const std::string& attr, size_t start_from) {
@@ -442,6 +511,29 @@ static void parse_primary(const std::string& path, const std::string& repo_id, F
                         size_t name_end = pkg_xml.find("\"", entry_pos);
                         if (name_end != std::string::npos) {
                             pkg.provides.push_back(pkg_xml.substr(entry_pos, name_end - entry_pos));
+                            entry_pos = name_end;
+                        }
+                    }
+                }
+            }
+
+            // Extract requires for dependency resolution
+            size_t req_start = pkg_xml.find("<rpm:requires>");
+            if (req_start != std::string::npos) {
+                size_t req_end = pkg_xml.find("</rpm:requires>", req_start);
+                if (req_end != std::string::npos) {
+                    size_t entry_pos = req_start;
+                    while (true) {
+                        entry_pos = pkg_xml.find("<rpm:entry name=\"", entry_pos);
+                        if (entry_pos == std::string::npos || entry_pos > req_end) break;
+                        entry_pos += 17;
+                        size_t name_end = pkg_xml.find("\"", entry_pos);
+                        if (name_end != std::string::npos) {
+                            std::string req_name = pkg_xml.substr(entry_pos, name_end - entry_pos);
+                            // Filter out internal RPM capabilities and self-requirements
+                            if (req_name.find("rpmlib(") != 0 && req_name != pkg.name) {
+                                pkg.requires_list.push_back(req_name);
+                            }
                             entry_pos = name_end;
                         }
                     }
@@ -723,8 +815,11 @@ extern "C" int dvf_repo_check_updates(void) {
 
     if (updates.empty()) {
         if (scanned_repos == 0) {
-            printf("\n\033[1;33mWarning:\033[0m No repository metadata found. Updates cannot be checked.\n");
-            printf("Please run 'dvf update' to synchronize repository data first.\n\n");
+            if (dvf_util_prompt_yes_no("No repository metadata found. Run 'dvf update' now?")) {
+                if (dvf_repo_update() == 0) {
+                    return dvf_repo_check_updates();
+                }
+            }
         } else {
             printf("No updates available.\n");
         }
@@ -742,5 +837,282 @@ extern "C" int dvf_repo_check_updates(void) {
     }
     printf("\nTotal updates available: %zu\n", updates.size());
 
+    return 0;
+}
+
+extern "C" int dvf_repo_install(const char *pkg_name) {
+    if (!dvf_repo_has_metadata()) {
+        if (dvf_util_prompt_yes_no("No repository metadata found. Run 'dvf update' first?")) {
+            if (dvf_repo_update() != 0) return -1;
+        } else {
+            return -1;
+        }
+    }
+
+    DVF_FSM fsm;
+    fsm.load_repos();
+
+    const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
+    if (!dvf_util_file_exists(db_path)) db_path = "rpmdb.sqlite";
+
+    std::set<std::string> installed_names;
+    dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
+    if (blobs) {
+        for (size_t i = 0; i < blobs->count; i++) {
+            rpm_info_t info;
+            memset(&info, 0, sizeof(info));
+            if (rpm_parse_header(blobs->blobs[i].data, blobs->blobs[i].size, &info) == 0) {
+                if (info.name) installed_names.insert(info.name);
+            }
+            rpm_free_info(&info);
+        }
+        dvf_sqlite_free_blob_list(blobs);
+    }
+
+    std::vector<RepoPackage> to_install;
+    std::set<std::string> handled;
+    std::deque<std::string> queue;
+    queue.push_back(pkg_name);
+
+    printf("Resolving dependencies...\n");
+
+    while (!queue.empty()) {
+        std::string current = queue.front();
+        queue.pop_front();
+        if (handled.count(current) || installed_names.count(current)) continue;
+
+        bool found = false;
+        RepoPackage best;
+        std::string best_evr;
+
+        for (const auto& repo : fsm.repos) {
+            if (!repo.enabled) continue;
+            std::string primary_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.xml.zst";
+            if (!dvf_util_file_exists(primary_path.c_str()))
+                 primary_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.xml.gz";
+            if (!dvf_util_file_exists(primary_path.c_str()))
+                 primary_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.raw";
+
+            if (dvf_util_file_exists(primary_path.c_str())) {
+                parse_primary(primary_path, repo.id, [&](const RepoPackage& pkg) {
+                    bool match = (pkg.name == current);
+                    if (!match) {
+                        for (const auto& prov : pkg.provides) if (prov == current) { match = true; break; }
+                    }
+                    if (match) {
+                        std::string pkg_evr = pkg.epoch + ":" + pkg.version + "-" + pkg.release;
+                        if (!found || dvf_util_compare_versions(pkg_evr.c_str(), best_evr.c_str()) > 0) {
+                            best = pkg;
+                            best_evr = pkg_evr;
+                            found = true;
+                        }
+                    }
+                });
+            }
+        }
+
+        if (found) {
+            if (handled.count(best.name) || installed_names.count(best.name)) continue;
+            to_install.push_back(best);
+            handled.insert(best.name);
+            for (const auto& prov : best.provides) handled.insert(prov);
+            for (const auto& req : best.requires_list) {
+                if (!handled.count(req) && !installed_names.count(req)) {
+                    queue.push_back(req);
+                }
+            }
+            printf("  + %s (%s)\n", best.name.c_str(), best.repo_id.c_str());
+        } else {
+            dvf_log_error("Could not resolve dependency: %s\n", current.c_str());
+            return -1;
+        }
+    }
+
+    if (to_install.empty()) {
+        printf("Nothing to do. Package already installed.\n");
+        return 0;
+    }
+
+    printf("\nTotal packages to install: %zu\n", to_install.size());
+
+    if (!dvf_util_prompt_yes_no("Is this ok?")) {
+        printf("Operation aborted.\n");
+        return 0;
+    }
+
+    if (curl_global_init(CURL_GLOBAL_ALL) != 0) return -1;
+
+    for (auto& pkg : to_install) {
+        // Find a mirror for this repo
+        Repo repo;
+        for (const auto& r : fsm.repos) if (r.id == pkg.repo_id) { repo = r; break; }
+        std::vector<std::string> mirrors = fsm.get_mirrors(repo);
+
+        bool downloaded = false;
+        std::string rpm_path = std::string(g_dvf_cache_dir) + "/" + pkg.name + ".rpm";
+
+        for (const auto& m : mirrors) {
+            std::string url = m;
+            if (url.back() != '/') url += "/";
+            url += pkg.location;
+
+            printf("Downloading %s...\n", pkg.name.c_str());
+            if (fsm.fetcher.fetchToFile(url, rpm_path)) {
+                downloaded = true;
+                break;
+            }
+        }
+
+        if (downloaded) {
+            printf("Extracting %s...\n", pkg.name.c_str());
+            if (rpm_unpack(rpm_path.c_str(), g_dvf_install_root) == 0) {
+                printf("Successfully installed %s to %s\n", pkg.name.c_str(), g_dvf_install_root);
+                // Update pkginfo.bin
+                rpm_info_t info;
+                memset(&info, 0, sizeof(info));
+                if (rpm_parse_file(rpm_path.c_str(), &info) == 0) {
+                    dvf_storage_write_pkg_info(&info);
+                    rpm_free_info(&info);
+                }
+            } else {
+                dvf_log_error("Failed to extract %s\n", pkg.name.c_str());
+            }
+            if (g_dvf_cleanup) unlink(rpm_path.c_str());
+        } else {
+            dvf_log_error("Failed to download %s\n", pkg.name.c_str());
+            curl_global_cleanup();
+            return -1;
+        }
+    }
+
+    curl_global_cleanup();
+    printf("\nInstallation complete!\n");
+    return 0;
+}
+
+extern "C" int dvf_repo_upgrade(void) {
+    if (!dvf_repo_has_metadata()) {
+        if (dvf_util_prompt_yes_no("No repository metadata found. Run 'dvf update' first?")) {
+            if (dvf_repo_update() != 0) return -1;
+        } else {
+            return -1;
+        }
+    }
+
+    DVF_FSM fsm;
+    fsm.load_repos();
+
+    const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
+    if (!dvf_util_file_exists(db_path)) db_path = "rpmdb.sqlite";
+
+    dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
+    if (!blobs) return -1;
+
+    std::map<std::string, std::map<std::string, std::string>> installed;
+    for (size_t i = 0; i < blobs->count; i++) {
+        rpm_info_t info;
+        memset(&info, 0, sizeof(info));
+        if (rpm_parse_header(blobs->blobs[i].data, blobs->blobs[i].size, &info) == 0) {
+            if (info.name && info.version && info.release) {
+                std::string evr = (info.epoch ? std::string(info.epoch) : "0") + ":" + info.version + "-" + info.release;
+                installed[info.name][info.arch ? info.arch : "noarch"] = evr;
+            }
+        }
+        rpm_free_info(&info);
+    }
+    dvf_sqlite_free_blob_list(blobs);
+
+    std::map<std::pair<std::string, std::string>, RepoPackage> updates;
+    for (const auto& repo : fsm.repos) {
+        if (!repo.enabled) continue;
+        std::string primary_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.xml.zst";
+        if (!dvf_util_file_exists(primary_path.c_str()))
+             primary_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.xml.gz";
+        if (!dvf_util_file_exists(primary_path.c_str()))
+             primary_path = std::string(g_dvf_cache_dir) + "/" + repo.id + "_primary.raw";
+
+        if (dvf_util_file_exists(primary_path.c_str())) {
+            parse_primary(primary_path, repo.id, [&](const RepoPackage& pkg) {
+                if (installed.count(pkg.name) && installed[pkg.name].count(pkg.arch)) {
+                    std::string inst_evr = installed[pkg.name][pkg.arch];
+                    std::string repo_evr = pkg.epoch + ":" + pkg.version + "-" + pkg.release;
+                    if (dvf_util_compare_versions(repo_evr.c_str(), inst_evr.c_str()) > 0) {
+                        auto key = std::make_pair(pkg.name, pkg.arch);
+                        if (updates.find(key) == updates.end() ||
+                            dvf_util_compare_versions(repo_evr.c_str(), (updates[key].epoch + ":" + updates[key].version + "-" + updates[key].release).c_str()) > 0) {
+                            updates[key] = pkg;
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    if (updates.empty()) {
+        printf("No packages to upgrade.\n");
+        return 0;
+    }
+
+    printf("\nThe following packages will be upgraded:\n");
+    printf("%-45s %-35s %s\n", "Package", "Version", "Repository");
+    printf("----------------------------------------------------------------------------------------------------\n");
+    for (const auto& pair : updates) {
+        const auto& pkg = pair.second;
+        std::string evr = pkg.epoch + ":" + pkg.version + "-" + pkg.release;
+        std::string name_arch = pkg.name + "." + pkg.arch;
+        printf("%-45s %-35s %s\n", name_arch.c_str(), evr.c_str(), pkg.repo_id.c_str());
+    }
+    printf("\nTotal packages to upgrade: %zu\n", updates.size());
+
+    if (!dvf_util_prompt_yes_no("Proceed with upgrade?")) {
+        printf("Upgrade aborted.\n");
+        return 0;
+    }
+
+    if (curl_global_init(CURL_GLOBAL_ALL) != 0) return -1;
+
+    for (const auto& pair : updates) {
+        auto pkg = pair.second;
+        Repo repo;
+        for (const auto& r : fsm.repos) if (r.id == pkg.repo_id) { repo = r; break; }
+        std::vector<std::string> mirrors = fsm.get_mirrors(repo);
+
+        bool downloaded = false;
+        std::string rpm_path = std::string(g_dvf_cache_dir) + "/" + pkg.name + ".rpm";
+
+        for (const auto& m : mirrors) {
+            std::string url = m;
+            if (url.back() != '/') url += "/";
+            url += pkg.location;
+
+            printf("Downloading %s...\n", pkg.name.c_str());
+            if (fsm.fetcher.fetchToFile(url, rpm_path)) {
+                downloaded = true;
+                break;
+            }
+        }
+
+        if (downloaded) {
+            printf("Upgrading %s...\n", pkg.name.c_str());
+            if (rpm_unpack(rpm_path.c_str(), g_dvf_install_root) == 0) {
+                printf("Successfully upgraded %s in %s\n", pkg.name.c_str(), g_dvf_install_root);
+                // Update pkginfo.bin
+                rpm_info_t info;
+                memset(&info, 0, sizeof(info));
+                if (rpm_parse_file(rpm_path.c_str(), &info) == 0) {
+                    dvf_storage_write_pkg_info(&info);
+                    rpm_free_info(&info);
+                }
+            } else {
+                dvf_log_error("Failed to upgrade %s\n", pkg.name.c_str());
+            }
+            if (g_dvf_cleanup) unlink(rpm_path.c_str());
+        } else {
+            dvf_log_error("Failed to download %s\n", pkg.name.c_str());
+        }
+    }
+
+    curl_global_cleanup();
+    printf("\nUpgrade complete.\n");
     return 0;
 }

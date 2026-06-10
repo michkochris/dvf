@@ -3,6 +3,8 @@
 #include "dvf-rpm.h"
 #include "dvf-util.h"
 #include "dvf-config.h"
+#include "dvf-storage.h"
+#include "dvf-hash.h"
 #ifdef ENABLE_CPP_FFI
 #include "dvf-repo.h"
 #endif
@@ -34,7 +36,8 @@ static int compare_strings(const void *a, const void *b) {
 
 int dvf_sync_autocomplete(void) {
     dvf_log_verbose("Starting autocomplete index synchronization...\n");
-    printf("[1/4] Reading installed package database (rpmdb)...\n");
+    printf("Indexing local packages (rpmdb)... ");
+    fflush(stdout);
 
     const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
     if (!dvf_util_file_exists(db_path)) {
@@ -48,24 +51,23 @@ int dvf_sync_autocomplete(void) {
 
     dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
     if (!blobs) {
+        printf("\033[1;31mFAILED\033[0m\n");
         dvf_log_error("Failed to read rpmdb.sqlite at %s\n", db_path);
         return -1;
     }
 
-    dvf_log_verbose("[2/4] Extracting package metadata from %zu records...\n", blobs->count);
-    printf("  Found %zu installed packages.\n", blobs->count);
+    printf("%zu found.\n", blobs->count);
 
-    char **names = NULL;
-    size_t count = 0;
+    dvf_hash_table_t *table = dvf_hash_create_table(blobs->count);
 
     for (size_t i = 0; i < blobs->count; i++) {
         rpm_info_t info;
         memset(&info, 0, sizeof(info));
         if (rpm_parse_header(blobs->blobs[i].data, blobs->blobs[i].size, &info) == 0) {
             if (info.name) {
-                names = realloc(names, sizeof(char *) * (count + 1));
-                names[count++] = info.name;
-                info.name = NULL;
+                // Persistent storage: write pkginfo.bin
+                dvf_storage_write_pkg_info(&info);
+                dvf_hash_add_package(table, &info);
             } else {
                 dvf_log_debug("  Blob %zu parsed but had no name tag.\n", i);
             }
@@ -81,37 +83,46 @@ int dvf_sync_autocomplete(void) {
     size_t repo_count = 0;
     char **repo_names = dvf_repo_get_all_names(&repo_count);
     if (repo_names) {
-        printf("  Found %zu packages in remote repositories.\n", repo_count);
-        names = (char**)realloc(names, sizeof(char *) * (count + repo_count));
+        printf("Indexing repository metadata...    %zu found.\n", repo_count);
         for (size_t i = 0; i < repo_count; i++) {
-            names[count++] = repo_names[i];
+            rpm_info_t repo_info;
+            memset(&repo_info, 0, sizeof(repo_info));
+            repo_info.name = repo_names[i];
+            dvf_hash_add_package(table, &repo_info);
+            // repo_names[i] is now owned by the hash table if we're not careful
+            // but copy_rpm_info does strdup, so we still need to free repo_names[i]
+            free(repo_names[i]);
         }
-        free(repo_names); // Array only, strings are now in names[]
-    } else {
-        printf("  No repository metadata found. Run 'dvf update' first.\n");
+        free(repo_names);
     }
 #endif
 
-    if (count == 0) {
+    if (table->count == 0) {
         dvf_log_verbose("No packages found to index.\n");
+        dvf_hash_destroy_table(table);
         return 0;
     }
 
-    printf("[3/4] Processing and deduplicating %zu total package names...\n", count);
-    qsort(names, count, sizeof(char *), compare_strings);
+    printf("Deduplicating unique entries...    ");
+    fflush(stdout);
 
-    // Deduplicate
-    size_t unique_count = 0;
-    for (size_t i = 0; i < count; i++) {
-        if (i > 0 && strcmp(names[i], names[i-1]) == 0) {
-            free(names[i]);
-            continue;
+    size_t count = table->count;
+    char **names = (char **)malloc(sizeof(char *) * count);
+    size_t idx = 0;
+    for (size_t i = 0; i < table->size; i++) {
+        dvf_hash_node_t *curr = table->buckets[i];
+        while (curr) {
+            names[idx++] = strdup(curr->data.name);
+            curr = curr->next;
         }
-        names[unique_count++] = names[i];
     }
-    count = unique_count;
+    dvf_hash_destroy_table(table);
 
-    printf("[4/4] Rebuilding autocomplete index with %zu unique entries...\n", count);
+    qsort(names, count, sizeof(char *), compare_strings);
+    printf("%zu unique.\n", count);
+
+    printf("Writing binary index...            ");
+    fflush(stdout);
 
     size_t strings_size = 0;
     for (size_t i = 0; i < count; i++) {
@@ -124,7 +135,7 @@ int dvf_sync_autocomplete(void) {
     FILE *fp = fopen(index_path, "wb");
     if (!fp) {
         dvf_log_error("Failed to open %s for writing\n", index_path);
-        for (size_t i = 0; i < count; i++) free(names[i]);
+        for (size_t i = 0; i < count; i++) dvf_util_free_and_null(&names[i]);
         free(names);
         return -1;
     }
@@ -145,12 +156,13 @@ int dvf_sync_autocomplete(void) {
 
     for (size_t i = 0; i < count; i++) {
         fwrite(names[i], strlen(names[i]) + 1, 1, fp);
-        free(names[i]);
+        dvf_util_free_and_null(&names[i]);
     }
     free(names);
     fclose(fp);
 
     chmod(index_path, 0644);
+    printf("\033[1;32m[DONE]\033[0m\n");
     dvf_log_verbose("Synchronization complete. Index saved to %s\n", index_path);
     return 0;
 }
@@ -409,6 +421,7 @@ void handle_binary_completion(const char *partial, const char *prev) {
                 else if (strcmp(tok, "search") == 0) strncpy(inferred_cmd, "search", sizeof(inferred_cmd)-1);
                 else if (strcmp(tok, "info") == 0) strncpy(inferred_cmd, "info", sizeof(inferred_cmd)-1);
                 else if (strcmp(tok, "check-update") == 0) strncpy(inferred_cmd, "check-update", sizeof(inferred_cmd)-1);
+                else if (strcmp(tok, "upgrade") == 0) strncpy(inferred_cmd, "upgrade", sizeof(inferred_cmd)-1);
                 else if (strcmp(tok, "sync") == 0) strncpy(inferred_cmd, "sync", sizeof(inferred_cmd)-1);
                 tok = strtok_r(NULL, " \t", &saveptr);
             }
@@ -417,7 +430,7 @@ void handle_binary_completion(const char *partial, const char *prev) {
     }
 
     if (strcmp(prev, "dvf") == 0) {
-        const char *subcmds[] = {"update", "install", "remove", "search", "info", "check-update", "sync"};
+        const char *subcmds[] = {"update", "install", "upgrade", "remove", "search", "info", "check-update", "sync"};
         for (size_t i = 0; i < sizeof(subcmds)/sizeof(subcmds[0]); i++) {
             if (strncmp(subcmds[i], partial, strlen(partial)) == 0) printf("%s\n", subcmds[i]);
         }
@@ -436,7 +449,7 @@ void handle_binary_completion(const char *partial, const char *prev) {
         }
     } else if (strcmp(cmd, "remove") == 0 || strcmp(cmd, "search") == 0) {
         prefix_search_and_print(partial);
-    } else if (strcmp(cmd, "update") == 0 || strcmp(cmd, "sync") == 0 || strcmp(cmd, "check-update") == 0) {
+    } else if (strcmp(cmd, "update") == 0 || strcmp(cmd, "sync") == 0 || strcmp(cmd, "check-update") == 0 || strcmp(cmd, "upgrade") == 0) {
         if (partial[0] == '-') printf("--verbose\n--debug\n");
     }
 }

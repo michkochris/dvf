@@ -1,8 +1,14 @@
 # dvf configuration file
-# This is a sample configuration for dvf (Vamped DNF)
+# This is a sample configuration for dvf (Vamped Up DNF Dandified YUM)
 
 # Base directory for dvf data
 dvf_dir = /var/lib/dvf
+
+# Alternate installation root (e.g. /mnt/lfs)
+install_root = /mnt/lfs
+
+# Directory to scan for additional .repo files (defaults to /etc/yum.repos.d)
+repo_dir = /etc/yum.repos.d
 
 # Enable/Disable MD5 checks
 md5_checks = yes

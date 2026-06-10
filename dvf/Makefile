@@ -1,4 +1,4 @@
-# Makefile for dvf (Vamped DNF)
+# Makefile for dvf (Vamped Up DNF Dandified YUM)
 
 CC ?= gcc
 CXX ?= g++
@@ -12,8 +12,8 @@ LIBS =
 CPP_LDFLAGS = -lcurl -lssl -lcrypto -lz -lpthread
 
 # Source files
-C_SOURCES = dvf-main.c dvf-config.c dvf-util.c dvf-rpm.c dvf-sqlite.c dvf-completion.c
-HEADERS = dvf-config.h dvf-util.h dvf-rpm.h dvf-sqlite.h dvf-completion.h
+C_SOURCES = dvf-main.c dvf-config.c dvf-util.c dvf-rpm.c dvf-sqlite.c dvf-completion.c dvf-storage.c dvf-hash.c
+HEADERS = dvf-config.h dvf-util.h dvf-rpm.h dvf-sqlite.h dvf-completion.h dvf-storage.h dvf-hash.h
 
 TARGET = dvf
 
@@ -63,19 +63,47 @@ install: all
 		echo "Configuration file installed to $(REPO_DIR)/dvf-config"; \
 	fi
 	@echo "-----------------------------------------------------------------------"
-	@echo "⚡ DVF (Vamped DNF) successfully installed! ⚡"
+	@echo "⚡ DVF (Vamped Up DNF Dandified YUM) successfully installed! ⚡"
 	@echo ""
 	@echo "Binary: $(PREFIX)/bin/$(TARGET)"
 	@echo "Config: $(REPO_DIR)/dvf-config"
 	@echo "-----------------------------------------------------------------------"
+	@echo "⚡ LIGHTNING FAST AUTOCOMPLETE ⚡"
+	@echo "To enable context-aware completion for the current session, run:"
+	@echo "  complete -C dvf dvf"
+	@echo ""
+	@echo "To enable it permanently, add that same line to your ~/.bashrc"
+	@echo "-----------------------------------------------------------------------"
 
 uninstall:
 	@echo "Attempting to uninstall $(TARGET)..."
-	@if [ -f $(DESTDIR)$(REPO_DIR)/dvf-config ]; then \
-		echo "Removing configuration from $(DESTDIR)$(REPO_DIR)/dvf-config"; \
+	@CONF=""; \
+	if [ -f $(DESTDIR)$(REPO_DIR)/dvf-config ]; then \
+		CONF="$(DESTDIR)$(REPO_DIR)/dvf-config"; \
+	fi; \
+	if [ -n "$$CONF" ]; then \
+		echo "-----------------------------------------------------------------------"; \
+		echo "NOTICE: Configuration found at $$CONF"; \
+		echo "The following data directories may still exist and were NOT removed:"; \
+		BASE=$$(grep "^dvf_dir[[:space:]]*=" $$CONF | cut -d= -f2 | tr -d ' \r\t'); \
+		if [ -n "$$BASE" ]; then \
+			echo "  - $$BASE (Base data)"; \
+			echo "  - $$BASE/db (Package database)"; \
+			echo "  - $$BASE/cache (Metadata/RPM cache)"; \
+		fi; \
+		grep -E "^(install_root|repo_dir)[[:space:]]*=" $$CONF | while read -r line; do \
+			val=$$(echo "$$line" | cut -d= -f2 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//'); \
+			key=$$(echo "$$line" | cut -d= -f1 | tr -d ' \r\t'); \
+			if [ "$$key" = "install_root" ]; then label="Install root"; else label="Repo directory"; fi; \
+			echo "  - $$val ($$label)"; \
+		done; \
+		echo ""; \
+		echo "You may want to remove these manually to fully purge $(TARGET) data."; \
+		echo "-----------------------------------------------------------------------"; \
+		echo "Removing configuration: $$CONF"; \
+		rm -f $$CONF; \
 	fi
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
-	rm -f $(DESTDIR)$(REPO_DIR)/dvf-config
 	@echo "Uninstallation complete."
 
 debug: CFLAGS += -DDEBUG -O0

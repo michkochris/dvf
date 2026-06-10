@@ -1,4 +1,4 @@
-# DVF (Vamped DNF Dandified YUM)
+# DVF (Vamped Up DNF Dandified YUM)
 
 ### ⚠️ Under Development...
 This repository is a **Work in Progress (WIP)**.
@@ -48,6 +48,8 @@ dvf update sync install conky
 - `libcurl-devel`
 - `libzstd` (for metadata decompression)
 - `gcc` / `g++` (C++17 support required)
+- cpio
+
 
 ## Building and Installation
 

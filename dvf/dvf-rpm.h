@@ -46,11 +46,16 @@ typedef struct {
 #define RPMTAG_SUMMARY 1004
 #define RPMTAG_DESCRIPTION 1005
 #define RPMTAG_ARCH 1022
+#define RPMTAG_BASENAMES 1028
+#define RPMTAG_DIRNAMES 1030
+#define RPMTAG_DIRINDEXES 1031
 #define RPMTAG_PAYLOADCOMPRESSOR 1125
 
 // Important Types
 #define RPM_STRING_TYPE 6
-#define RPM_I18NSTRING_TYPE 8
+#define RPM_STRING_ARRAY_TYPE 8
+#define RPM_I18NSTRING_TYPE 9
+#define RPM_INT32_TYPE 4
 
 typedef struct {
     char *name;
@@ -62,12 +67,16 @@ typedef struct {
     char *description;
     char *payload_compressor;
     long payload_offset;
+
+    char **file_list;
+    size_t file_count;
 } rpm_info_t;
 
 int rpm_parse_file(const char *filename, rpm_info_t *info);
 int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info);
 void rpm_free_info(rpm_info_t *info);
 void rpm_print_info(const rpm_info_t *info);
+int rpm_unpack(const char *filename, const char *dest_dir);
 
 #ifdef __cplusplus
 }

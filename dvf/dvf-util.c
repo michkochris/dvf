@@ -70,10 +70,10 @@ int dvf_util_create_dir_recursive(const char *path, int mode) {
 
 char *dvf_util_trim_whitespace(char *str) {
     char *end;
-    while (isspace((unsigned char)*str)) str++;
+    while (isspace((unsigned char)*str) || *str == '\r' || *str == '\n') str++;
     if (*str == 0) return str;
     end = str + strlen(str) - 1;
-    while (end > str && isspace((unsigned char)*end)) end--;
+    while (end > str && (isspace((unsigned char)*end) || *end == '\r' || *end == '\n')) end--;
     end[1] = '\0';
     return str;
 }
@@ -107,6 +107,22 @@ bool dvf_util_parse_yes_no(const char *val, bool default_val) {
     if (strcasecmp(val, "yes") == 0 || strcasecmp(val, "y") == 0 || strcmp(val, "1") == 0 || strcasecmp(val, "true") == 0) return true;
     if (strcasecmp(val, "no") == 0 || strcasecmp(val, "n") == 0 || strcmp(val, "0") == 0 || strcasecmp(val, "false") == 0) return false;
     return default_val;
+}
+
+bool dvf_util_prompt_yes_no(const char *prompt) {
+    printf("%s [y/N] ", prompt);
+    fflush(stdout);
+    char buf[16];
+    if (!fgets(buf, sizeof(buf), stdin)) return false;
+    char *p = dvf_util_trim_whitespace(buf);
+    return (strcasecmp(p, "y") == 0 || strcasecmp(p, "yes") == 0);
+}
+
+void dvf_util_free_and_null(char **ptr) {
+    if (ptr != NULL && *ptr != NULL) {
+        free(*ptr);
+        *ptr = NULL;
+    }
 }
 
 static int version_part_order(char c) {
@@ -179,4 +195,16 @@ int dvf_util_compare_versions(const char *v1, const char *v2) {
         return compare_version_part("", r2 + 1);
     }
     return compare_version_part(u1, u2);
+}
+
+uint32_t dvf_util_hash_string(const char *str) {
+    if (!str) return 0;
+    const uint32_t FNV_PRIME_32 = 16777619U;
+    const uint32_t FNV_OFFSET_BASIS_32 = 2166136261U;
+    uint32_t hash = FNV_OFFSET_BASIS_32;
+    for (const char *p = str; *p != '\0'; p++) {
+        hash ^= (uint8_t)*p;
+        hash *= FNV_PRIME_32;
+    }
+    return hash;
 }

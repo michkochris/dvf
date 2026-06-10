@@ -10,6 +10,10 @@ extern "C" {
 extern char *g_dvf_base_dir;
 extern char *g_dvf_db_dir;
 extern char *g_dvf_cache_dir;
+extern char *g_dvf_install_root;
+extern char *g_dvf_repo_dir;
+extern bool g_dvf_md5_checks;
+extern bool g_dvf_cleanup;
 
 void dvf_config_init();
 void dvf_config_cleanup();
