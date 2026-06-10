@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // RPM Lead (Legacy, 96 bytes)
 typedef struct {
     uint8_t magic[4];   // ed ab ee db
@@ -58,5 +62,9 @@ int rpm_parse_file(const char *filename, rpm_info_t *info);
 int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info);
 void rpm_free_info(rpm_info_t *info);
 void rpm_print_info(const rpm_info_t *info);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // DVF_RPM_H

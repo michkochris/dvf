@@ -3,6 +3,9 @@
 #include "dvf-rpm.h"
 #include "dvf-util.h"
 #include "dvf-config.h"
+#ifdef ENABLE_CPP_FFI
+#include "dvf-repo.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +34,7 @@ static int compare_strings(const void *a, const void *b) {
 
 int dvf_sync_autocomplete(void) {
     dvf_log_verbose("Starting autocomplete index synchronization...\n");
-    dvf_log_verbose("[1/4] Reading installed package database (rpmdb)...\n");
+    printf("[1/4] Reading installed package database (rpmdb)...\n");
 
     const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
     if (!dvf_util_file_exists(db_path)) {
@@ -50,6 +53,7 @@ int dvf_sync_autocomplete(void) {
     }
 
     dvf_log_verbose("[2/4] Extracting package metadata from %zu records...\n", blobs->count);
+    printf("  Found %zu installed packages.\n", blobs->count);
 
     char **names = NULL;
     size_t count = 0;
@@ -72,12 +76,28 @@ int dvf_sync_autocomplete(void) {
     }
     dvf_sqlite_free_blob_list(blobs);
 
+#ifdef ENABLE_CPP_FFI
+    dvf_log_verbose("  Checking for repository metadata...\n");
+    size_t repo_count = 0;
+    char **repo_names = dvf_repo_get_all_names(&repo_count);
+    if (repo_names) {
+        printf("  Found %zu packages in remote repositories.\n", repo_count);
+        names = (char**)realloc(names, sizeof(char *) * (count + repo_count));
+        for (size_t i = 0; i < repo_count; i++) {
+            names[count++] = repo_names[i];
+        }
+        free(repo_names); // Array only, strings are now in names[]
+    } else {
+        printf("  No repository metadata found. Run 'dvf update' first.\n");
+    }
+#endif
+
     if (count == 0) {
         dvf_log_verbose("No packages found to index.\n");
         return 0;
     }
 
-    dvf_log_verbose("[3/4] Processing and deduplicating %zu package names...\n", count);
+    printf("[3/4] Processing and deduplicating %zu total package names...\n", count);
     qsort(names, count, sizeof(char *), compare_strings);
 
     // Deduplicate
@@ -91,7 +111,7 @@ int dvf_sync_autocomplete(void) {
     }
     count = unique_count;
 
-    dvf_log_verbose("[4/4] Rebuilding autocomplete index with %zu unique entries...\n", count);
+    printf("[4/4] Rebuilding autocomplete index with %zu unique entries...\n", count);
 
     size_t strings_size = 0;
     for (size_t i = 0; i < count; i++) {
@@ -220,7 +240,10 @@ void complete_file_paths_ext(const char *partial, const char *extra_dir, const c
             if (last_slash) {
                 size_t sd_len = strlen(search_dir);
                 const char *sep = (sd_len > 0 && search_dir[sd_len-1] == '/') ? "" : "/";
-                snprintf(namebuf, sizeof(namebuf), "%s%s%s", search_dir, sep, e->d_name);
+                snprintf(namebuf, sizeof(namebuf), "%.*s%s%.*s",
+                         (int)(sizeof(namebuf)/2), search_dir,
+                         sep,
+                         (int)(sizeof(namebuf)/2 - 2), e->d_name);
             } else {
                 snprintf(namebuf, sizeof(namebuf), "%s", e->d_name);
             }

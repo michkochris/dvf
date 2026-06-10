@@ -55,10 +55,13 @@ int main(int argc, char **argv) {
         if (argv[i][0] == '-') continue; // Skip options
 
         if (strcmp(argv[i], "update") == 0) {
+            printf("Updating repository metadata...\n");
 #ifdef ENABLE_CPP_FFI
             if (dvf_repo_update() != 0) {
                 dvf_log_error("Update failed.\n");
                 exit_code = 1;
+            } else {
+                printf("Update complete.\n");
             }
 #else
             dvf_log_verbose("Update command called (Core mode - FSM disabled)\n");
@@ -67,6 +70,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "install") == 0) {
             if (i + 1 < argc) {
                 const char *pkg = argv[++i];
+                printf("Resolving dependencies for %s...\n", pkg);
 #ifdef ENABLE_CPP_FFI
                 if (dvf_repo_install(pkg) != 0) {
                     dvf_log_error("Failed to install %s\n", pkg);
@@ -82,14 +86,16 @@ int main(int argc, char **argv) {
             }
         } else if (strcmp(argv[i], "remove") == 0) {
              if (i + 1 < argc) {
-                printf("Removing %s...\n", argv[++i]);
+                const char *pkg = argv[++i];
+                printf("Removing %s...\n", pkg);
             } else {
                 dvf_log_error("remove requires a package name.\n");
                 exit_code = 1;
             }
         } else if (strcmp(argv[i], "search") == 0) {
              if (i + 1 < argc) {
-                printf("Searching for '%s'...\n", argv[++i]);
+                const char *term = argv[++i];
+                printf("Searching for '%s'...\n", term);
             } else {
                 dvf_log_error("search requires a search term.\n");
                 exit_code = 1;
@@ -97,6 +103,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "info") == 0) {
             if (i + 1 < argc) {
                 const char *target = argv[++i];
+                printf("Fetching information for %s...\n", target);
                 if (dvf_util_file_exists(target) && strstr(target, ".rpm")) {
                     rpm_info_t info;
                     if (rpm_parse_file(target, &info) == 0) {
@@ -139,9 +146,12 @@ int main(int argc, char **argv) {
                 exit_code = 1;
             }
         } else if (strcmp(argv[i], "sync") == 0) {
+            printf("Synchronizing autocomplete index...\n");
             if (dvf_sync_autocomplete() != 0) {
                 dvf_log_error("Failed to sync autocomplete index.\n");
                 exit_code = 1;
+            } else {
+                printf("Autocomplete index sync complete.\n");
             }
         } else {
             dvf_log_error("Unknown command: %s\n", argv[i]);

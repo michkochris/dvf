@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern bool g_verbose_mode;
 
 void dvf_log_verbose(const char *fmt, ...);
@@ -16,5 +20,9 @@ int dvf_util_create_dir_recursive(const char *path, int mode);
 char *dvf_util_trim_whitespace(char *str);
 char *dvf_util_get_config_value(const char *filepath, const char *key, char separator);
 bool dvf_util_parse_yes_no(const char *val, bool default_val);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // DVF_UTIL_H

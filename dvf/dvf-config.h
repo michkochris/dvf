@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern char *g_dvf_base_dir;
 extern char *g_dvf_db_dir;
 extern char *g_dvf_cache_dir;
@@ -10,5 +14,9 @@ extern char *g_dvf_cache_dir;
 void dvf_config_init();
 void dvf_config_cleanup();
 int dvf_config_load();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // DVF_CONFIG_H

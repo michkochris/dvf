@@ -1,5 +1,4 @@
 # Makefile for dvf (Vamped DNF)
-# Based on the runepkg model
 
 CC ?= gcc
 CXX ?= g++
@@ -9,34 +8,12 @@ CXXFLAGS = -Wall -Wextra -std=c++17 -D_GNU_SOURCE -g -MMD -MP -pthread
 LDFLAGS = -pthread
 LIBS =
 
-# C++ FFI support detection
-WITH_CPP ?= auto
+# C++ FFI support configuration
 CPP_LDFLAGS = -lcurl -lssl -lcrypto -lz -lpthread
-CXX_AVAILABLE := $(shell command -v g++ >/dev/null 2>&1 && echo 1 || echo 0)
-LIBCURL_AVAILABLE := $(shell pkg-config --exists libcurl 2>/dev/null && echo 1 || echo 0)
-CPP_DEPS_AVAILABLE := $(shell command -v g++ >/dev/null 2>&1 && pkg-config --exists libcurl 2>/dev/null && echo 1 || echo 0)
-CPP_WRAPPER_EXISTS := $(if $(wildcard dvf-repo.cpp),1,0)
-CPP_FFI_AVAILABLE := $(if $(and $(filter 1,$(CPP_DEPS_AVAILABLE)),$(filter 1,$(CPP_WRAPPER_EXISTS))),1,0)
 
-ifeq ($(WITH_CPP),auto)
-    ifeq ($(CPP_FFI_AVAILABLE),1)
-        WITH_CPP = 1
-    else
-        WITH_CPP = 0
-    endif
-endif
-
-ifeq ($(WITH_CPP),1)
-    CFLAGS += -DENABLE_CPP_FFI
-    LDFLAGS += $(CPP_LDFLAGS)
-    CPP_SOURCES = dvf-repo.cpp
-    CPP_OBJECTS = $(CPP_SOURCES:.cpp=.o)
-    CPP_HEADERS = dvf-repo.h
-else
-    CPP_SOURCES =
-    CPP_OBJECTS =
-    CPP_HEADERS =
-endif
+# Source files
+C_SOURCES = dvf-main.c dvf-config.c dvf-util.c dvf-rpm.c dvf-sqlite.c dvf-completion.c
+HEADERS = dvf-config.h dvf-util.h dvf-rpm.h dvf-sqlite.h dvf-completion.h
 
 TARGET = dvf
 
@@ -46,34 +23,29 @@ PREFIX ?= /usr
 ETCDIR ?= /etc
 REPO_DIR ?= $(ETCDIR)/yum.repos.d
 
-# Source files
-C_SOURCES = dvf-main.c dvf-config.c dvf-util.c dvf-rpm.c dvf-sqlite.c dvf-completion.c
-OBJS = $(C_SOURCES:.c=.o) $(CPP_SOURCES:.cpp=.o)
-
-# Header files
-HEADERS = dvf-config.h dvf-util.h dvf-rpm.h dvf-sqlite.h dvf-completion.h $(CPP_HEADERS)
-
 .PHONY: all clean dvf debug install uninstall
 
 .DEFAULT_GOAL := dvf
 
-dvf: WITH_CPP=0
-dvf: $(OBJS)
-	$(CC) $(OBJS) -o $@ $(LDFLAGS) $(LIBS)
+# Basic build (Core mode)
+dvf: $(C_SOURCES:.c=.o)
+	$(CC) $(C_SOURCES:.c=.o) -o $@ $(LDFLAGS) $(LIBS)
 
-all: WITH_CPP=1
-all: $(OBJS)
-	$(CXX) $(OBJS) -o $(TARGET) $(LDFLAGS) $(LIBS)
+# FFI build (Advanced mode)
+# Note: We force re-compilation of C objects with the FFI flag if 'all' is chosen
+all: CFLAGS += -DENABLE_CPP_FFI
+all: $(C_SOURCES:.c=.o) dvf-repo.o
+	$(CXX) $(C_SOURCES:.c=.o) dvf-repo.o -o $(TARGET) $(LDFLAGS) $(CPP_LDFLAGS) $(LIBS)
 
 %.o: %.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.o: %.cpp $(HEADERS)
+%.o: %.cpp dvf-repo.h $(HEADERS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	@echo "Cleaning up build artifacts..."
-	rm -f $(OBJS) $(TARGET) $(C_SOURCES:.c=.d) $(CPP_SOURCES:.cpp=.d)
+	rm -f *.o *.d $(TARGET)
 	rm -rf test_rpms
 	@echo "🧹 Clean complete."
 
@@ -108,6 +80,6 @@ uninstall:
 
 debug: CFLAGS += -DDEBUG -O0
 debug: CXXFLAGS += -DDEBUG -O0
-debug: dvf
+debug: all
 
--include $(C_SOURCES:.c=.d) $(CPP_SOURCES:.cpp=.d)
+-include *.d

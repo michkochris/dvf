@@ -225,7 +225,7 @@ static uint32_t scan_master_for_packages(FILE *f, uint32_t page_num, uint32_t pa
             const uint8_t *cell_ptr = page + cell_offset;
 
             size_t len;
-            uint64_t payload_size = read_varint(cell_ptr, &len);
+            (void)read_varint(cell_ptr, &len);
             const uint8_t *rec_ptr = cell_ptr + len;
             uint64_t rowid = read_varint(rec_ptr, &len);
             rec_ptr += len;
