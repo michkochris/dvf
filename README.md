@@ -1,6 +1,12 @@
-# DVF (Vamped DNF)
+# DVF (Vamped DNF Dandified YUM)
 
-DVF is a high-performance successor to `dnf` (Dandified YUM), designed with a modular architecture that combines a lightweight C core with a powerful C++ FFI layer for advanced repository management and Finite State Machine (FSM) based mirror selection.
+### ⚠️ Under Development...
+This repository is a **Work in Progress (WIP)**.
+* **Current Stage:** Alpha / Prototyping
+* **Stability:** Unstable. Expect breaking updates.
+* **Contributions:** Not accepting external pull requests quite yet, but feel free to open an issue for discussion!
+
+DVF is a high-performance and vamped up reimplementation of `dnf` (Dandified YUM), designed with a modular architecture that combines a lightweight C core with a powerful C++ FFI layer for advanced repository management and Finite State Machine (FSM) based mirror selection.
 
 ## Features
 
