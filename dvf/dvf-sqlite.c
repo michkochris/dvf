@@ -89,7 +89,7 @@ static void parse_table_btree_leaf(FILE *f, const uint8_t *page_start, uint32_t 
     uint16_t cell_count = read_be16(header + 3);
     const uint8_t *cell_pointers = header + 8;
 
-    dvf_log_verbose("    Parsing B-tree leaf page %u with %d cells\n", page_num, cell_count);
+    dvf_log_debug("    Parsing B-tree leaf page %u with %d cells\n", page_num, cell_count);
 
     for (int i = 0; i < cell_count; i++) {
         uint16_t cell_offset = read_be16(cell_pointers + i * 2);
@@ -213,7 +213,7 @@ static uint32_t scan_master_for_packages(FILE *f, uint32_t page_num, uint32_t pa
     uint8_t page_type = header[0];
     uint16_t cell_count = read_be16(header + 3);
 
-    dvf_log_verbose("  Scanning sqlite_master page %u (type 0x%02x, cells %u)...\n", page_num, page_type, cell_count);
+    dvf_log_debug("  Scanning sqlite_master page %u (type 0x%02x, cells %u)...\n", page_num, page_type, cell_count);
 
     uint32_t found_root = 0;
 
@@ -253,7 +253,7 @@ static uint32_t scan_master_for_packages(FILE *f, uint32_t page_num, uint32_t pa
                 if (root_st == 1) found_root = root_ptr[0];
                 else if (root_st == 2) found_root = read_be16(root_ptr);
                 else if (root_st == 4) found_root = read_be32(root_ptr);
-                dvf_log_verbose("    -> Root page for 'Packages' is %u\n", found_root);
+    dvf_log_debug("    -> Root page for 'Packages' is %u\n", found_root);
                 break;
             }
         }
@@ -277,7 +277,7 @@ static uint32_t scan_master_for_packages(FILE *f, uint32_t page_num, uint32_t pa
 }
 
 dvf_blob_list_t *dvf_sqlite_get_package_blobs(const char *db_path) {
-    dvf_log_verbose("Opening rpmdb at %s\n", db_path);
+    dvf_log_debug("Opening rpmdb at %s\n", db_path);
     FILE *f = fopen(db_path, "rb");
     if (!f) {
         dvf_log_verbose("Could not open %s: %s\n", db_path, strerror(errno));
@@ -299,19 +299,19 @@ dvf_blob_list_t *dvf_sqlite_get_package_blobs(const char *db_path) {
 
     uint32_t page_size = read_be16(header + 16);
     if (page_size == 1) page_size = 65536;
-    dvf_log_verbose("SQLite page size: %u\n", page_size);
+    dvf_log_debug("SQLite page size: %u\n", page_size);
 
     dvf_blob_list_t *list = calloc(1, sizeof(dvf_blob_list_t));
 
-    dvf_log_verbose("Searching sqlite_master for 'Packages' table...\n");
+    dvf_log_debug("  Scanning system package database (rpmdb)...\n");
     uint32_t packages_root = scan_master_for_packages(f, 1, page_size);
 
     if (packages_root > 0) {
-        dvf_log_verbose("Parsing 'Packages' table at root page %u...\n", packages_root);
+        dvf_log_debug("  Found 'Packages' table, extracting records...\n");
         parse_page(f, packages_root, page_size, list);
-        dvf_log_verbose("Extraction complete. Found %zu package blobs.\n", list->count);
+        dvf_log_debug("  Extracted %zu raw package records.\n", list->count);
     } else {
-        dvf_log_verbose("Could not find 'Packages' table in sqlite_master.\n");
+        dvf_log_verbose("  Error: Could not find 'Packages' table in rpmdb.\n");
     }
 
     fclose(f);

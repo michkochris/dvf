@@ -30,13 +30,17 @@ static int compare_strings(const void *a, const void *b) {
 }
 
 int dvf_sync_autocomplete(void) {
-    dvf_log_verbose("Syncing autocomplete index from rpmdb...\n");
+    dvf_log_verbose("Starting autocomplete index synchronization...\n");
+    dvf_log_verbose("[1/4] Reading installed package database (rpmdb)...\n");
 
     const char *db_path = "/var/lib/rpm/rpmdb.sqlite";
     if (!dvf_util_file_exists(db_path)) {
-        dvf_log_verbose("Primary rpmdb not found at %s, trying fallback...\n", db_path);
         // Maybe try a relative path for testing or common alternate locations
-        if (dvf_util_file_exists("rpmdb.sqlite")) db_path = "rpmdb.sqlite";
+        if (dvf_util_file_exists("rpmdb.sqlite")) {
+             db_path = "rpmdb.sqlite";
+        } else {
+             dvf_log_verbose("  Primary rpmdb not found at %s\n", db_path);
+        }
     }
 
     dvf_blob_list_t *blobs = dvf_sqlite_get_package_blobs(db_path);
@@ -45,7 +49,7 @@ int dvf_sync_autocomplete(void) {
         return -1;
     }
 
-    dvf_log_verbose("Found %zu blobs in rpmdb. Parsing headers...\n", blobs->count);
+    dvf_log_verbose("[2/4] Extracting package metadata from %zu records...\n", blobs->count);
 
     char **names = NULL;
     size_t count = 0;
@@ -59,21 +63,21 @@ int dvf_sync_autocomplete(void) {
                 names[count++] = info.name;
                 info.name = NULL;
             } else {
-                dvf_log_verbose("  Blob %zu parsed but had no name tag.\n", i);
+                dvf_log_debug("  Blob %zu parsed but had no name tag.\n", i);
             }
         } else {
-            dvf_log_verbose("  Failed to parse RPM header for blob %zu (size %zu).\n", i, blobs->blobs[i].size);
+            dvf_log_debug("  Failed to parse RPM header for blob %zu (size %zu).\n", i, blobs->blobs[i].size);
         }
         rpm_free_info(&info);
     }
     dvf_sqlite_free_blob_list(blobs);
 
     if (count == 0) {
-        dvf_log_verbose("No packages found in rpmdb.\n");
+        dvf_log_verbose("No packages found to index.\n");
         return 0;
     }
 
-    dvf_log_verbose("Sorting and deduplicating %zu package names...\n", count);
+    dvf_log_verbose("[3/4] Processing and deduplicating %zu package names...\n", count);
     qsort(names, count, sizeof(char *), compare_strings);
 
     // Deduplicate
@@ -86,6 +90,8 @@ int dvf_sync_autocomplete(void) {
         names[unique_count++] = names[i];
     }
     count = unique_count;
+
+    dvf_log_verbose("[4/4] Rebuilding autocomplete index with %zu unique entries...\n", count);
 
     size_t strings_size = 0;
     for (size_t i = 0; i < count; i++) {
@@ -125,7 +131,7 @@ int dvf_sync_autocomplete(void) {
     fclose(fp);
 
     chmod(index_path, 0644);
-    dvf_log_verbose("Autocomplete index rebuilt with %zu entries.\n", count);
+    dvf_log_verbose("Synchronization complete. Index saved to %s\n", index_path);
     return 0;
 }
 
