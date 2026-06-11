@@ -52,14 +52,6 @@ int main(int argc, char **argv) {
 
     dvf_config_init();
 
-    // Lazy sync: if the autocomplete index is missing, trigger a sync.
-    char index_path[4096];
-    snprintf(index_path, sizeof(index_path), "%s/autocomplete.bin", g_dvf_db_dir);
-    if (!dvf_util_file_exists(index_path)) {
-        dvf_log_verbose("Autocomplete index missing. Synchronizing...\n");
-        dvf_sync_autocomplete();
-    }
-
     int exit_code = 0;
 
     // Interleaved command handling
@@ -80,30 +72,39 @@ int main(int argc, char **argv) {
             if (i + 1 < argc) {
                 const char *pkg = argv[++i];
                 if (dvf_util_file_exists(pkg) && strstr(pkg, ".rpm")) {
-                    printf("Installing local RPM: %s\n", pkg);
-                    if (dvf_util_prompt_yes_no("Proceed with installation?")) {
-                        if (rpm_unpack(pkg, g_dvf_install_root) == 0) {
-                            printf("\nSuccessfully installed %s to %s\n", pkg, g_dvf_install_root);
-                            // Also update pkginfo.bin
-                            rpm_info_t info;
-                            memset(&info, 0, sizeof(info));
-                            if (rpm_parse_file(pkg, &info) == 0) {
+                    rpm_info_t info;
+                    if (rpm_parse_file(pkg, &info) == 0) {
+                        const rpm_info_t *pkgs[1] = { &info };
+                        rpm_print_transaction_summary(pkgs, 1, "Installing");
+                        if (dvf_util_prompt_yes_no("Is this ok")) {
+                            printf("Running transaction\n");
+                            printf("  Preparing        :                                                        1/1\n");
+                            printf("  Installing       : %s-%s-%s.%s", info.name, info.version, info.release, info.arch);
+                            fflush(stdout);
+
+                            if (rpm_unpack(pkg, g_dvf_install_root) == 0) {
+                                printf("               1/1\n");
+                                printf("\nComplete!\n");
                                 dvf_storage_write_pkg_info(&info);
-                                rpm_free_info(&info);
+                            } else {
+                                printf("               [FAILED]\n");
+                                dvf_log_error("Failed to install local RPM: %s\n", pkg);
+                                exit_code = 1;
                             }
-                        } else {
-                            dvf_log_error("Failed to install local RPM: %s\n", pkg);
-                            exit_code = 1;
                         }
+                        rpm_free_info(&info);
+                    } else {
+                        dvf_log_error("Failed to parse RPM file: %s\n", pkg);
+                        exit_code = 1;
                     }
                 } else {
-                    printf("Resolving dependencies for %s...\n", pkg);
 #ifdef ENABLE_CPP_FFI
                     if (dvf_repo_install(pkg) != 0) {
                         dvf_log_error("Failed to install %s\n", pkg);
                         exit_code = 1;
                     }
 #else
+                    printf("Resolving dependencies for %s...\n", pkg);
                     printf("Installing %s (Core mode)...\n", pkg);
                     printf("Notice: Advanced mirror selection and repository install requires C++ FFI.\n");
 #endif

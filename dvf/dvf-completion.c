@@ -36,7 +36,7 @@ static int compare_strings(const void *a, const void *b) {
 
 int dvf_sync_autocomplete(void) {
     dvf_log_verbose("Starting autocomplete index synchronization...\n");
-    printf("Indexing local packages (rpmdb)... ");
+    printf("Indexing local packages (rpmdb)...    ");
     fflush(stdout);
 
     const char *db_path = "/var/lib/rpm/rpmdb.sqlite";

@@ -13,7 +13,7 @@ CPP_LDFLAGS = -lcurl -lssl -lcrypto -lz -lpthread
 
 # Source files
 C_SOURCES = dvf-main.c dvf-config.c dvf-util.c dvf-rpm.c dvf-sqlite.c dvf-completion.c dvf-storage.c dvf-hash.c
-HEADERS = dvf-config.h dvf-util.h dvf-rpm.h dvf-sqlite.h dvf-completion.h dvf-storage.h dvf-hash.h
+HEADERS = dvf-config.h dvf-util.h dvf-rpm.h dvf-sqlite.h dvf-completion.h dvf-storage.h dvf-hash.h dvf-metadata.h
 
 TARGET = dvf
 

@@ -25,6 +25,14 @@ void rpm_free_info(rpm_info_t *info) {
         info->file_list = NULL;
     }
     info->file_count = 0;
+    if (info->provides_list) {
+        for (size_t i = 0; i < info->provides_count; i++) {
+            dvf_util_free_and_null(&info->provides_list[i]);
+        }
+        free(info->provides_list);
+        info->provides_list = NULL;
+    }
+    info->provides_count = 0;
     memset(info, 0, sizeof(rpm_info_t));
 }
 
@@ -40,6 +48,26 @@ void rpm_print_info(const rpm_info_t *info) {
     printf("\033[1mCompressor    \033[0m: %s\n", info->payload_compressor ? info->payload_compressor : "unknown");
     if (info->payload_offset > 0)
         printf("\033[1mPayload Offset\033[0m: %ld bytes\n", info->payload_offset);
+}
+
+void rpm_print_transaction_summary(const rpm_info_t **pkgs, size_t count, const char *action) {
+    printf("\nDependencies resolved.\n");
+    printf("================================================================================\n");
+    printf(" %-20s %-15s %-25s %-15s\n", "Package", "Architecture", "Version", "Repository");
+    printf("================================================================================\n");
+    printf("%s:\n", action);
+
+    for (size_t i = 0; i < count; i++) {
+        const rpm_info_t *info = pkgs[i];
+        printf(" %-20s %-15s %-25s %-15s\n",
+               info->name,
+               info->arch ? info->arch : "noarch",
+               info->version,
+               "@commandline");
+    }
+    printf("\nTransaction Summary\n");
+    printf("================================================================================\n");
+    printf("%-10s %zu Package%s\n\n", action, count, count > 1 ? "s" : "");
 }
 
 static char *get_tag_string(const rpm_index_entry_t *entry, const uint8_t *data_store) {
@@ -147,6 +175,9 @@ int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info) {
                 break;
             case RPMTAG_DIRINDEXES:
                 dirindexes = get_tag_int32_array(&indices[i], data_store, &index_count_files);
+                break;
+            case RPMTAG_PROVIDENAME:
+                info->provides_list = get_tag_string_array(&indices[i], data_store, (uint32_t *)&info->provides_count);
                 break;
         }
     }
@@ -278,8 +309,8 @@ int rpm_unpack(const char *filename, const char *dest_dir) {
     // tail -c +N is 1-indexed, payload_offset is 0-indexed.
     // Use --no-absolute-filenames to ensure everything stays inside target even if RPM has absolute paths.
     snprintf(cmd, sizeof(cmd),
-             "sh -c \"mkdir -p '%s' && cd '%s' && tail -c +%ld '%s' | %s | cpio -idmuv --quiet --no-absolute-filenames\"",
-             target, target, info.payload_offset + 1, abs_path, decompressor);
+             "sh -c \"mkdir -p '%s' && cd '%s' && tail -c +%ld '%s' | %s | cpio -idmu%s --quiet --no-absolute-filenames\"",
+             target, target, info.payload_offset + 1, abs_path, decompressor, g_verbose_mode ? "v" : "");
 
     dvf_log_verbose("Extracting %s payload to %s using %s...\n", info.name, target, decompressor);
 

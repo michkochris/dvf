@@ -49,6 +49,7 @@ typedef struct {
 #define RPMTAG_BASENAMES 1028
 #define RPMTAG_DIRNAMES 1030
 #define RPMTAG_DIRINDEXES 1031
+#define RPMTAG_PROVIDENAME 1047
 #define RPMTAG_PAYLOADCOMPRESSOR 1125
 
 // Important Types
@@ -70,12 +71,16 @@ typedef struct {
 
     char **file_list;
     size_t file_count;
+
+    char **provides_list;
+    size_t provides_count;
 } rpm_info_t;
 
 int rpm_parse_file(const char *filename, rpm_info_t *info);
 int rpm_parse_header(const uint8_t *data, size_t size, rpm_info_t *info);
 void rpm_free_info(rpm_info_t *info);
 void rpm_print_info(const rpm_info_t *info);
+void rpm_print_transaction_summary(const rpm_info_t **pkgs, size_t count, const char *action);
 int rpm_unpack(const char *filename, const char *dest_dir);
 
 #ifdef __cplusplus
